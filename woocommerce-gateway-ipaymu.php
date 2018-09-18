@@ -149,9 +149,6 @@ function woocommerce_ipaymu_init() {
         
         function process_payment($order_id) {
             global $woocommerce;
-            $order = wc_get_order($order_id);
-            $order->reduce_order_stock();
-            wc_empty_cart();
 
             return array(
                 'result' => 'success',
@@ -161,6 +158,11 @@ function woocommerce_ipaymu_init() {
   
         function check_ipaymu_response() {
             global $woocommerce;
+
+            $order = wc_get_order($_GET['id_order']);
+            $order->reduce_order_stock();
+            wc_empty_cart();
+
 			$redirect = add_query_arg('key', $order->order_key, add_query_arg('order', $_GET['id_order'], get_permalink(woocommerce_get_page_id('thanks'))));
             wp_redirect($redirect);
             exit;
