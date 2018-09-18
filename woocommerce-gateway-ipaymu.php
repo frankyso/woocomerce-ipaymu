@@ -149,9 +149,9 @@ function woocommerce_ipaymu_init() {
         
         function process_payment($order_id) {
             global $woocommerce;
-            $order = new WC_Order($order_id);
-			$order->reduce_order_stock();
-			WC()->cart->empty_cart();
+            $order = wc_get_order($order_id);
+            $order->reduce_order_stock();
+            wc_empty_cart();
 
             return array(
                 'result' => 'success',
