@@ -1,4 +1,5 @@
 <?php
+
 /*
  * Plugin Name: Woocomerce Payment Gateway - iPaymu
  * Plugin URL: https://ipaymu.com
@@ -6,6 +7,8 @@
  * Version: 1.0
  * Author: Franky So
  */
+
+if ( ! defined( 'ABSPATH' ) ) exit; 
 
 add_action('plugins_loaded', 'woocommerce_ipaymu_init', 0);
 
@@ -17,34 +20,40 @@ function woocommerce_ipaymu_init() {
     class WC_Gateway_iPaymu extends WC_Payment_Gateway {
 
         public function __construct() {
+            
+            //plugin id
             $this->id = 'ipaymu';
+            //Payment Gateway title
             $this->method_title = 'iPaymu Payment Gateway';
+            //true only in case of direct payment method, false in our case
             $this->has_fields = false;
-            $this->icon = plugins_url('/logo.png', __FILE__);
+            //payment gateway logo
+            $this->icon = plugins_url('/ipaymu_badge.png', __FILE__);
             
             //redirect URL
             $this->redirect_url = str_replace( 'https:', 'http:', add_query_arg( 'wc-api', 'WC_Gateway_iPaymu', home_url( '/' ) ) );
-        
+            
+            //Load settings
             $this->init_form_fields();
             $this->init_settings();
             
             // Define user set variables
-            $this->enabled      = $this->settings['enabled'];
-            $this->title        = "Ipaymu Express Checkout";
-            $this->description  = $this->settings['description'];
-            $this->apikey       = $this->settings['apikey'];
-            $this->password     = $this->settings['password'];
-            $this->processor_id = $this->settings['processor_id'];
-            $this->salemethod   = $this->settings['salemethod'];
-            $this->gatewayurl   = $this->settings['gatewayurl'];
-            $this->order_prefix = $this->settings['order_prefix'];
-            $this->debugon      = $this->settings['debugon'];
-            $this->debugrecip   = $this->settings['debugrecip'];
-            $this->cvv          = $this->settings['cvv'];
+            $this->enabled      = @$this->settings['enabled'];
+            $this->title        = "Ipaymu Payment";
+            $this->description  = @$this->settings['description'];
+            $this->apikey       = @$this->settings['apikey'];
+            $this->password     = @$this->settings['password'];
+            $this->processor_id = @$this->settings['processor_id'];
+            $this->salemethod   = @$this->settings['salemethod'];
+            $this->gatewayurl   = @$this->settings['gatewayurl'];
+            $this->order_prefix = @$this->settings['order_prefix'];
+            $this->debugon      = @$this->settings['debugon'];
+            $this->debugrecip   = @$this->settings['debugrecip'];
+            $this->cvv          = @$this->settings['cvv'];
             
             // Actions
             add_action('woocommerce_update_options_payment_gateways_' . $this->id, array(&$this, 'process_admin_options'));
-            add_action('woocommerce_receipt_ipaymu', array(&$this, 'payment_redirect'));
+            add_action('woocommerce_receipt_ipaymu', array(&$this, 'receipt_page'));
             
             // Payment listener/API hook
             add_action( 'woocommerce_api_wc_gateway_ipaymu', array( $this, 'check_ipaymu_response' ) );
@@ -70,14 +79,20 @@ function woocommerce_ipaymu_init() {
                                 'title' => __( 'Description', 'woothemes' ), 
                                 'type' => 'textarea', 
                                 'description' => __( '', 'woothemes' ), 
-                                'default' => 'Bayar dengan ATM Transfer, Credit Card, menerima lebih dari 137 Bank di Indonesia.'
+                                'default' => 'Sistem pembayaran menggunakan iPaymu.'
                             ),  
                 'apikey' => array(
                                 'title' => __( 'API Key', 'woothemes' ), 
                                 'type' => 'text', 
-                                'description' => __( 'Belum memiliki kode API? <a target="_blank" href="https://ipaymu.com/dokumentasi-api-ipaymu-perkenalan">Pelajari cara Mendapatkan API Key</a></small>.', 'woothemes' ), 
+                                'description' => __( ' Dapatkan API Key <a href=https://ipaymu.com/login/members/profile.htm target=_blank>di sini</a></small>.', 'woothemes' ), 
                                 'default' => ''
                             ),
+                /*'debugrecip' => array(
+                                'title' => __( 'Debugging Email', 'woothemes' ), 
+                                'type' => 'text', 
+                                'description' => __( 'Who should receive the debugging emails.', 'woothemes' ), 
+                                'default' =>  get_option('admin_email')
+                            ),*/
             );
         }
 
@@ -90,12 +105,17 @@ function woocommerce_ipaymu_init() {
         function payment_fields() {
             if ($this->description)
                 echo wpautop(wptexturize($this->description));
-		}
-		
-		function payment_redirect($order_id){
-			global $woocommerce;
-			
-			$wc_order 	=	wc_get_order($order_id);
+        }
+
+        
+        function receipt_page($order) {
+            echo $this->generate_ipaymu_form($order);
+        }
+
+        
+        public function generate_ipaymu_form($order_id) {
+
+            global $woocommerce;
             
             $order = new WC_Order($order_id);
             
@@ -110,8 +130,8 @@ function woocommerce_ipaymu_init() {
                         'price'    => $order->order_total, // Total Harga
                         'quantity' => 1,
                         'comments' => '', // Optional           
-                        'ureturn'  => $this->get_return_url($wc_order),
-                        'unotify'  => $this->get_ipaymu_notify_url($order_id),
+                        'ureturn'  => $this->redirect_url.'&id_order='.$order_id,
+                        'unotify'  => $this->redirect_url.'&id_order='.$order_id.'&param=notify',
                         'ucancel'  => $this->redirect_url.'&id_order='.$order_id.'&param=cancel',
                         'format'   => 'json' // Format: xml / json. Default: xml 
                     );
@@ -145,10 +165,16 @@ function woocommerce_ipaymu_init() {
 
             //close connection
             curl_close($ch);
-		}
+        }
+
         
         function process_payment($order_id) {
             global $woocommerce;
+            $order = new WC_Order($order_id);
+
+			$order->reduce_order_stock();
+
+			WC()->cart->empty_cart();
 
             return array(
                 'result' => 'success',
@@ -157,22 +183,21 @@ function woocommerce_ipaymu_init() {
 
   
         function check_ipaymu_response() {
+            
             global $woocommerce;
+            $order = new WC_Order($_REQUEST['id_order']);
 
-            $order = wc_get_order($_GET['id_order']);
-            $order->reduce_order_stock();
-            wc_empty_cart();
+            if($_REQUEST['status'] == 'berhasil') {
+            	$order->add_order_note( __( 'Pembayaran telah dilakukan melalui ipaymu dengan id transaksi '.$_REQUEST['trx_id'], 'woocommerce' ) );
+            	$order->payment_complete();
+            } else {
+            	$order->add_order_note( __( 'Menunggu pembayaran melalui non-member ipaymu dengan id transaksi '.$_REQUEST['trx_id'], 'woocommerce' ) );
+            }
 
-			$redirect = add_query_arg('key', $order->order_key, add_query_arg('order', $_GET['id_order'], get_permalink(woocommerce_get_page_id('thanks'))));
+            $redirect = add_query_arg('key', $order->order_key, add_query_arg('order', $_REQUEST['id_order'], get_permalink(woocommerce_get_page_id('thanks'))));
             wp_redirect($redirect);
             exit;
-        }
-        
-        function get_ipaymu_notify_url($order_id) {
-            $callbackurl = get_option('siteurl');
-
-            $params = array('ipaymu_callback_woocomerce' => '1', 'order_id' => $order_id);
-            return add_query_arg($params, $callbackurl);
+            
         }
 
     }
@@ -183,65 +208,4 @@ function woocommerce_ipaymu_init() {
     }
 
     add_filter('woocommerce_payment_gateways', 'add_ipaymu_gateway');
-
-	
-	// Register Callback for Notify
-    function ipaymu_callback_woocomerce() {
-        global $woocommerce;
-        if(isset($_POST['trx_id']) && isset($_POST['status']))
-        {
-			$order = new WC_Order($_REQUEST['order_id']);
-			update_post_meta( $order->id, '_ipaymu', $_POST['trx_id']);
-
-            if($_POST['status'] == 'berhasil') {
-            	$order->add_order_note( __( 'Pembayaran telah dilakukan melalui ipaymu dengan id transaksi '.$_POST['trx_id'], 'woocommerce' ) );
-				$order->payment_complete();
-            } elseif($_POST['status']=="pending") {
-				$order->add_order_note( __( 'Menunggu pembayaran melalui non-member ipaymu dengan id transaksi '.$_POST['trx_id'], 'woocommerce' ) );
-			}
-
-            exit();
-        }
-    }
-    
-    add_action('init', 'ipaymu_callback_woocomerce');
 }
-
-// Adding Cronjob
-if ( ! wp_next_scheduled( 'wc_ipy_cronjob' ) ) {
-    wp_schedule_event( time(), 'hourly', 'wc_ipy_cronjob' );
-}
-
-add_action( 'wc_ipy_cronjob', 'ipycronjob');
-
-function ipycronjob() {
-	global $woocommerce;
-
-	$apiKey 	=	get_option('woocommerce_ipaymu_settings');
-	
-	$orders = wc_get_orders( 
-		[
-			'payment_method' => 'ipaymu',
-			'date_created' => '>' . strtotime('-2 day', strtotime(date("Y-m-d"))),
-			'status' => 'pending'
-		]
-	);
-
-	foreach($orders as $order)
-	{
-		$ipaymu 	=	get_post_meta( $order->id, '_ipaymu', true );
-		$content 	=	json_decode(file_get_contents("https://my.ipaymu.com/api/CekTransaksi.php?format=json&key=".$apiKey['apikey']."&id=".$ipaymu), true);
-
-		if($content['Status'] == 1) {
-			$order->add_order_note( __( 'Pembayaran telah dilakukan melalui ipaymu dengan id transaksi '.$content['id'], 'woocommerce' ) );
-			$order->payment_complete();
-		}
-	}
-}
-
-// Deactivate Cronjob when plugin deactivated
-function plugin_deactivation() {
-    wp_clear_scheduled_hook("wc_ipy_cronjob");
-}
-
-register_deactivation_hook( __FILE__, 'plugin_deactivation' );
